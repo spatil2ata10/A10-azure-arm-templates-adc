@@ -10,14 +10,15 @@ Functions:
 
 param (
     [Parameter(Mandatory=$True)]
-    [String] $vThunderProcessingIP
+    [String] $vThunderProcessingIP,
+    [Parameter(Mandatory=$True)]
+    [String] $vThPassword
 )
 
 # Get resource config from variables
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
 $azureAutoScaleResources = $azureAutoScaleResources | ConvertFrom-Json
 $vThUsername = Get-AutomationVariable -Name vThUsername
-$vThPassword = Get-AutomationVariable -Name vThPassword
 
 if ($null -eq $azureAutoScaleResources) {
     Write-Error "azureAutoScaleResources data is missing." -ErrorAction Stop
@@ -91,8 +92,9 @@ function Get-AuthToken {
     `n        `"password`": `"$vThPassword`"
     `n    }
     `n}"
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     # Invoke Auth url
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
     # fetch Authorization token from response
     $authorizationToken = $Response.authresponse.signature
     if ($null -eq $authorizationToken) {
@@ -151,7 +153,8 @@ function SSLUpload {
         Method      = 'Post'
         Headers     = $headers
     }
-    $response = Invoke-RestMethod @params -AllowUnencryptedAuthentication:$true -SkipCertificateCheck:$true -SkipHeaderValidation:$false -SkipHttpErrorCheck:$false -DisableKeepAlive:$false -TimeoutSec $timeOut
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod @params -AllowUnencryptedAuthentication:$true -SkipHeaderValidation:$false -SkipHttpErrorCheck:$false -DisableKeepAlive:$false -TimeoutSec $timeOut
     if ($null -eq $response) {
         Write-Error "Failed to configure SSL certificate"
     } else {
