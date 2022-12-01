@@ -19,7 +19,9 @@ param (
      [Parameter(Mandatory=$True)]
      [String] $vThunderProcessingIP,
      [Parameter(Mandatory=$True)]
-     [String] $agentPrivateIP
+     [String] $agentPrivateIP,
+     [Parameter(Mandatory=$True)]
+     [String] $vThPassword
 )
 
 # Get resource config from variables
@@ -40,7 +42,6 @@ $pscredential = New-Object -TypeName System.Management.Automation.PSCredential -
 Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 
 $vThUsername = Get-AutomationVariable -Name vThUsername
-$vThPassword = Get-AutomationVariable -Name vThPassword
 
 function GetAuthToken {
     <#
@@ -67,8 +68,9 @@ function GetAuthToken {
     `n        `"password`": `"$vThPassword`"
     `n    }
     `n}"
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     # Invoke Auth url
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
     # fetch Authorization token from response
     $authorizationToken = $Response.authresponse.signature
     if ($null -eq $authorizationToken) {
@@ -110,9 +112,9 @@ function AcosEventsMessageSelector {
     `n    ]
     `n  }
     `n}"
-
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $url = -join($baseUrl, "/acos-events/message-selector")
-    $response = Invoke-RestMethod -SkipCertificateCheck $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod $url -Method 'POST' -Headers $headers -Body $body
     $response | ConvertTo-Json
 }
 
@@ -151,9 +153,10 @@ function AcosEventsLogServer {
     `n    ]
     `n  }
     `n}"
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
 
     $url = -join($baseUrl, "/acos-events/log-server")
-    $response = Invoke-RestMethod -SkipCertificateCheck $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod $url -Method 'POST' -Headers $headers -Body $body
     $response | ConvertTo-Json
 }
 
@@ -193,9 +196,9 @@ function AcosEventsCollectorGroup {
     `n    ]
     `n  }
     `n}"
-
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $url = -join($baseUrl, "/acos-events/collector-group")
-    $response = Invoke-RestMethod -SkipCertificateCheck $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod $url -Method 'POST' -Headers $headers -Body $body
     $response | ConvertTo-Json
 
 }
@@ -235,9 +238,9 @@ function AcosEventsTemplate {
     `n    ]
     `n  }
     `n}"
-
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $url = -join($baseUrl, "/acos-events/template")
-    $response = Invoke-RestMethod -SkipCertificateCheck $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod $url -Method 'POST' -Headers $headers -Body $body
     $response | ConvertTo-Json
 
 }
@@ -267,9 +270,9 @@ function AcosEventsActiveTemplate {
     `n    `"name`": `"fluentbitRemoteServer`"
     `n  }
     `n}"
-
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $url = -join($baseUrl, "/acos-events/active-template")
-    $response = Invoke-RestMethod -SkipCertificateCheck $url -Method 'POST' -Headers $headers -Body $body
+    $response = Invoke-RestMethod $url -Method 'POST' -Headers $headers -Body $body
     $response | ConvertTo-Json
 
 }
@@ -292,8 +295,9 @@ function WriteMemory {
     $url = -join($baseUrl, "/active-partition")
     $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
     $headers.Add("Authorization", -join("A10 ", $authorizationToken))
-
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $url -Method 'GET' -Headers $headers
+    $headers.Add("Content-Type", "application/json")
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod -Uri $url -Method 'GET' -Headers $headers
     $partition = $response.'active-partition'.'partition-name'
 
     if ($null -eq $partition) {
@@ -307,7 +311,12 @@ function WriteMemory {
         `n    `"partition`": `"$partition`"
         `n  }
         `n}"
-        $response = Invoke-RestMethod -SkipCertificateCheck -Uri $url -Method 'POST' -Headers $headers -Body $body
+
+        $headers1 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $headers1.Add("Authorization", -join("A10 ", $authorizationToken))
+        $headers1.Add("Content-Type", "application/json")
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers1 -Body $body
         if ($null -eq $response) {
             Write-Error "Failed to run write memory command"
         } else {
