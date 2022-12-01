@@ -138,7 +138,6 @@ function ActivateLicense {
     `n
     `n"
 
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $glmURL = $hostName + 'activations'
     $response = Invoke-RestMethod $glmURL -Method 'POST' -Headers $headers -Body $body
     if ($null -eq $response) {
