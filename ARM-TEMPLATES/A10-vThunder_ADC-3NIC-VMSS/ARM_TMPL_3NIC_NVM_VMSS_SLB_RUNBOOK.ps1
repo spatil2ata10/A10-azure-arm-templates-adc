@@ -16,13 +16,14 @@ param (
     [Parameter(Mandatory=$True)]
     [Boolean] $UpdateOnlyServers,
     [Parameter(Mandatory=$True)]
-    [String] $vThunderProcessingIP
+    [String] $vThunderProcessingIP,
+    [Parameter(Mandatory=$True)]
+    [String] $vThPassword
 )
 
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
 $azureAutoScaleResources = $azureAutoScaleResources | ConvertFrom-Json
 $vThUsername = Get-AutomationVariable -Name vThUsername
-$vThPassword = Get-AutomationVariable -Name vThPassword
 
 if ($null -eq $azureAutoScaleResources) {
     Write-Error "azureAutoScaleResources data is missing." -ErrorAction Stop
@@ -114,7 +115,9 @@ function Get-AuthToken {
     `n    }
     `n}"
     # Invoke Auth url
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $headers -Body $body
+
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $headers -Body $body
     # fetch Authorization token from response
     $AuthorizationToken = $Response.authresponse.signature
     if ($null -eq $AuthorizationToken) {
@@ -139,11 +142,6 @@ function ConfigureEthernets {
         $ethernetCount
     )
 
-    # AXAPI interface url headers
-    $Headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $Headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
-    $Headers.Add("Content-Type", "application/json")
-
     # initialize ethernet number to 1
     $ethernetNumber = 1
 
@@ -162,11 +160,15 @@ function ConfigureEthernets {
                     }
                 }
             }
-
         # convert body to json
+        # AXAPI interface url headers
+        $Headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $Headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
+        $Headers.Add("Content-Type", "application/json")
         $body = $body | ConvertTo-Json -Depth 6
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
         # Invoke interface AXAPI
-        $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $body
+        $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers -Body $body
         if ($null -eq $response) {
             Write-Error "Failed to configure ethernet-"$ethernetNumber" ip"
         } else {
@@ -194,8 +196,8 @@ function IPRouteConfig {
 
     # convert into json format
     $body = $body | ConvertTo-Json -Depth 6
-
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $body
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers -Body $body
     if ($null -eq $response) {
         Write-Error "Failed to configure ip route"
     } else {
@@ -226,8 +228,9 @@ function ConfigureServer {
     $Headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
     $Headers.Add("Content-Type", "application/json")
 
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     # get configured slb servers
-    $slbResponse = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'GET' -Headers $Headers
+    $slbResponse = Invoke-RestMethod -Uri $Url -Method 'GET' -Headers $Headers
     # get server list
     $serverList = $slbResponse.'server-list'
     $serverSet = New-Object System.Collections.Generic.HashSet[String]
@@ -244,8 +247,13 @@ function ConfigureServer {
             continue
         }
         # AXAPI Url
+        $Headers1 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $Headers1.Add("Authorization", -join("A10 ", $AuthorizationToken))
+        $Headers1.Add("Content-Type", "application/json")
         $Url = -join($BaseUrl, "/slb/server/", $server)
-        $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'DELETE' -Headers $Headers
+
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $Url -Method 'DELETE' -Headers $Headers1
         if ($null -eq $response) {
             Write-Error "Failed to delete server $server"
         } else {
@@ -273,7 +281,11 @@ function ConfigureServer {
         }
         # convert body to json
         $Body = $Body | ConvertTo-Json -Depth 6
-        $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $Body
+        $Headers2 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $Headers2.Add("Authorization", -join("A10 ", $AuthorizationToken))
+        $Headers2.Add("Content-Type", "application/json")
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers2 -Body $Body
         if ($null -eq $response) {
             Write-Error "Failed to configure server $server"
         } else {
@@ -302,11 +314,16 @@ function ConfigureServiceGroup {
 
     # get server list
     $slbUrl = -join($BaseUrl, "/slb/server")
-    $slbResponse = Invoke-RestMethod -SkipCertificateCheck -Uri $slbUrl -Method 'GET' -Headers $Headers
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $slbResponse = Invoke-RestMethod -Uri $slbUrl -Method 'GET' -Headers $Headers
 
     # get service group list
+    $Headers1 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+    $Headers1.Add("Authorization", -join("A10 ", $AuthorizationToken))
+    $Headers1.Add("Content-Type", "application/json")
     $Url = -join($BaseUrl, "/slb/service-group")
-    $sgResponse = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'GET' -Headers $Headers
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $sgResponse = Invoke-RestMethod -Uri $Url -Method 'GET' -Headers $Headers1
     $sgList = $sgResponse.'service-group-list'
 
     # Create existing service group and members mapping
@@ -348,7 +365,11 @@ function ConfigureServiceGroup {
                     "member"= $member
                 }
                 $Body = $Body | ConvertTo-Json -Depth 6
-                $response = Invoke-RestMethod -SkipCertificateCheck -Uri $memberUrl -Method 'POST' -Headers $Headers -Body $Body
+                $Headers3 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+                $Headers3.Add("Authorization", -join("A10 ", $AuthorizationToken))
+                $Headers3.Add("Content-Type", "application/json")
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+                $response = Invoke-RestMethod -Uri $memberUrl -Method 'POST' -Headers $Headers3 -Body $Body
 
                 $memberName = $member.name
                 if ($null -eq $response) {
@@ -384,7 +405,11 @@ function ConfigureServiceGroup {
                 "service-group"= $serviceGroup
             }
             $Body = $Body | ConvertTo-Json -Depth 6
-            $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $Body
+            $Headers4 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+            $Headers4.Add("Authorization", -join("A10 ", $AuthorizationToken))
+            $Headers4.Add("Content-Type", "application/json")
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+            $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers4 -Body $Body
 
             $name = $serviceGroup.name
             if ($null -eq $response) {
@@ -429,7 +454,8 @@ function ConfigureVirtualServer {
     $Body.Add("virtual-server-list", $VirtualServerList)
 
     $Body = $Body | ConvertTo-Json -Depth 6
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $Body
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers -Body $Body
     if ($null -eq $response) {
         Write-Error "Failed to configure virtual server"
     } else {
@@ -455,22 +481,26 @@ function WriteMemory {
     $Url = -join($BaseUrl, "/active-partition")
     $Headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
     $Headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
-
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'GET' -Headers $Headers
+    $Headers.Add("Content-Type", "application/json")
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+    $response = Invoke-RestMethod -Uri $Url -Method 'GET' -Headers $Headers
     $partition = $response.'active-partition'.'partition-name'
 
     if ($null -eq $partition) {
         Write-Error "Failed to get partition name"
     } else {
         $Url = -join($BaseUrl, "/write/memory")
-        $Headers.Add("Content-Type", "application/json")
+        $Headers1 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $Headers1.Add("Authorization", -join("A10 ", $AuthorizationToken))
+        $Headers1.Add("Content-Type", "application/json")
 
         $Body = "{
         `n  `"memory`": {
         `n    `"partition`": `"$partition`"
         `n  }
         `n}"
-        $response = Invoke-RestMethod -SkipCertificateCheck -Uri $Url -Method 'POST' -Headers $Headers -Body $Body
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers1 -Body $Body
         if ($null -eq $response) {
             Write-Error "Failed to run write memory command"
         } else {
