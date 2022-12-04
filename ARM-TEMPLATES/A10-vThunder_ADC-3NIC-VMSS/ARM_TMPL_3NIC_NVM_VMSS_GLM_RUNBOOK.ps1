@@ -140,9 +140,6 @@ function ActivateLicense {
 
     $glmURL = $hostName + 'activations'
     $response = Invoke-RestMethod $glmURL -Method 'POST' -Headers $headers -Body $body
-    if ($null -eq $response) {
-        Write-Error "License activation failed" -ErrorAction Stop
-    }
 }
 
 function ConfigurePrimaryDns {
@@ -268,7 +265,7 @@ function WriteMemory {
     $headers.Add("Content-Type", "application/json")
 
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -SkipCertificateCheck -Uri $url -Method 'GET' -Headers $headers
+    $response = Invoke-RestMethod -Uri $url -Method 'GET' -Headers $headers
     $partition = $response.'active-partition'.'partition-name'
 
     if ($null -eq $partition) {
