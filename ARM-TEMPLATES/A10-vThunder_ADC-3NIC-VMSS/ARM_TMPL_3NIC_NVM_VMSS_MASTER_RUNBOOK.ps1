@@ -36,13 +36,31 @@ Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 
 # Defining running IP object
 $vThunderRunningIp =  @{}
-$vThunderProcessedIP = Get-AutomationVariable -Name vThunderIP
-$vThunderProcessedIP = $vThunderProcessedIP | ConvertFrom-Json -AsHashtable
+$vThunderProcessedIPStr = Get-AutomationVariable -Name vThunderIP
 $agentPrivateIP = Get-AutomationVariable -Name agentPrivateIP
 $vThDefaultPassword = Get-AutomationVariable -Name vThDefaultPassword
 $vThCurrentPassword = Get-AutomationVariable -Name vThLastPass
 $vThNewPassword = Get-AutomationVariable -Name vThPassword
 $isPasswordChangesForAll = Get-AutomationVariable -Name vThNewPassApplyFlag
+
+function deserializer {
+    param (
+        $stringValue
+    )
+    $hashTable = @{}
+    $splitValue = $stringValue.Split(";")
+    foreach($keyValue in $splitValue[0..($splitValue.Length-2)]){
+        $keyValue = $keyValue.Trim()
+        $keyValue = $keyValue.Split("=")
+        if ($null -eq $keyValue[0] -or "" -eq $keyValue[0]){
+            continue
+        }
+        $hashTable.Add($keyValue[0],$keyValue[1])
+    }
+    return $hashTable
+}
+
+$vThunderProcessedIP = deserializer -stringValue $vThunderProcessedIPStr
 
 # Get list of vm from vmss
 $vms = Get-AzVmssVM -ResourceGroupName $resourceGroupName -VMScaleSetName $vThunderScaleSetName
@@ -100,10 +118,20 @@ foreach($oldip in $vThunderProcessedIP.Keys){
     }
 }
 
-# update new running vm ip object to variables
-$vThunderRunningIp = $vThunderRunningIp | ConvertTo-Json
-$vThunderRunningIp = "$vThunderRunningIp"
-Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIp
+function serializer {
+    param (
+        $hashtableValue
+    )
+    $stringValue = ""
+    foreach($key in $hashtableValue.Keys){
+        $value = $hashtableValue[$key]
+        $stringValue = $stringValue+"$key=$value;"
+    }
+    return $stringValue
+}
+
+$vThunderRunningIpStr = serializer -hashtableValue $vThunderRunningIp
+Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIpStr
 
 $vThNewPasswordPlanText = "$vThNewPassword"
 Set-AutomationVariable -Name "vThLastPass" -Value $vThNewPasswordPlanText
