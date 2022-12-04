@@ -21,7 +21,7 @@ $glmParam = $paramData.glmParam  | ConvertTo-Json
 $sslParam = $paramData.sslParam  | ConvertTo-Json
 $slbParam = $paramData.slbParam  | ConvertTo-Json -Depth 4
 $autoScaleParam = $paramData.autoScaleParam | ConvertTo-Json
-$vThunderIP = $paramData.vThunderIP  | ConvertTo-Json
+$vThunderIP = $paramData.vThunderIP
 $clientSecret = $paramData.clientSecret
 $resourceGroupName = $paramData.azureAutoScaleResources.resourceGroupName
 $automationAccountName = $paramData.azureAutoScaleResources.automationAccountName
@@ -29,10 +29,10 @@ $location = $paramData.azureAutoScaleResources.location
 $vCPUUsage = $paramData.vCPUUsage
 $agentPrivateIP = $paramData.agentPrivateIP
 $vThUsername = $paramData.vThUsername
-$vThPassword = $paramData.vThPassword
-
-# Create automation account
-New-AzAutomationAccount -Name $automationAccountName -Location $location -ResourceGroupName $resourceGroupName
+$vThDefaultPassword = $paramData.vThDefaultPassword
+$vThNewPassword = $paramData.vThPassword
+$vThCurrentPassword = $paramData.vThLastPass
+$isPasswordChangesForAll = $paramData.vThNewPassApplyFlag
 
 #Create runbook variables
 New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "azureAutoScaleResources" -Encrypted $False -Value $azureAutoScaleResources -ResourceGroupName $resourceGroupName
@@ -55,4 +55,10 @@ New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "ag
 
 New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThUsername" -Encrypted $False -Value $vThUsername -ResourceGroupName $resourceGroupName
 
-New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThPassword" -Encrypted $True -Value $vThPassword -ResourceGroupName $resourceGroupName
+New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThDefaultPassword" -Encrypted $True -Value $vThDefaultPassword -ResourceGroupName $resourceGroupName
+
+New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThLastPass" -Encrypted $True -Value $vThCurrentPassword -ResourceGroupName $resourceGroupName
+
+New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThPassword" -Encrypted $True -Value $vThNewPassword -ResourceGroupName $resourceGroupName
+
+New-AzAutomationVariable -AutomationAccountName $automationAccountName -Name "vThNewPassApplyFlag" -Encrypted $False -Value $isPasswordChangesForAll -ResourceGroupName $resourceGroupName
