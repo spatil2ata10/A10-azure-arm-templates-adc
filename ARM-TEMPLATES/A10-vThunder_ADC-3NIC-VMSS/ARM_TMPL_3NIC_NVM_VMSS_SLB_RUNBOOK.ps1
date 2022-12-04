@@ -40,7 +40,7 @@ Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 
 # Get ports from variables
 $slbParam = Get-AutomationVariable -Name slbParam
-$slbParam = $slbParam | ConvertFrom-Json -AsHashtable
+$slbParam = $slbParam | ConvertFrom-Json
 
 # Get variables
 $resourceGroupName = $azureAutoScaleResources.resourceGroupName
@@ -55,7 +55,7 @@ Write-Output $serverScaleSetName
 $slbPorts = $slbParam.slb_port
 $vipPorts = $slbParam.vip_port
 $ribList = $slbParam.rib_list
-Write-Output $slbPorts
+
 
 $ethernetCount = 2
 
