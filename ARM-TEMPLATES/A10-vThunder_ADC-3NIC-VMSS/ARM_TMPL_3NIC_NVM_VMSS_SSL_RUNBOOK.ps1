@@ -154,7 +154,7 @@ function SSLUpload {
         Headers     = $headers
     }
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod @params -AllowUnencryptedAuthentication:$true -SkipHeaderValidation:$false -SkipHttpErrorCheck:$false -DisableKeepAlive:$false -TimeoutSec $timeOut
+    $response = Invoke-RestMethod @params -TimeoutSec $timeOut
     if ($null -eq $response) {
         Write-Error "Failed to configure SSL certificate"
     } else {
