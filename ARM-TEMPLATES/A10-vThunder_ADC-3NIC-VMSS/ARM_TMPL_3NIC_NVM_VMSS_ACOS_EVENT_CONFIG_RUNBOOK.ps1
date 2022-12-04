@@ -24,23 +24,6 @@ param (
      [String] $vThPassword
 )
 
-# Get resource config from variables
-$azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
-$azureAutoScaleResources = $azureAutoScaleResources | ConvertFrom-Json
-
-if ($null -eq $azureAutoScaleResources) {
-    Write-Error "azureAutoScaleResources data is missing." -ErrorAction Stop
-}
-
-# Authenticate with Azure Portal
-$appId = $azureAutoScaleResources.appId
-$secret = Get-AutomationVariable -Name clientSecret
-$tenantId = $azureAutoScaleResources.tenantId
-
-$secureStringPwd = $secret | ConvertTo-SecureString -AsPlainText -Force
-$pscredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $appId, $secureStringPwd
-Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
-
 $vThUsername = Get-AutomationVariable -Name vThUsername
 
 function GetAuthToken {
@@ -304,7 +287,6 @@ function WriteMemory {
         Write-Error "Failed to get partition name"
     } else {
         $url = -join($baseUrl, "/write/memory")
-        $headers.Add("Content-Type", "application/json")
 
         $body = "{
         `n  `"memory`": {
