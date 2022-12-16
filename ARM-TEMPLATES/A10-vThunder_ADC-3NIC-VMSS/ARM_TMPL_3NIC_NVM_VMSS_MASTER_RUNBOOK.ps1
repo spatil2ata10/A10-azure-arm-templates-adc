@@ -10,7 +10,7 @@
 #>
 
 # Wait till vThunder is Up.
-start-sleep -s 180
+start-sleep -s 300
 
 # Get the resource config from variables
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
