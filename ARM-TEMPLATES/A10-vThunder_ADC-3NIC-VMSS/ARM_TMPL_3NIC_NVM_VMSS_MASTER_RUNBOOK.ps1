@@ -10,7 +10,7 @@
 #>
 
 # Wait till vThunder is Up.
-start-sleep -s 300
+start-sleep -s 180
 
 # Get the resource config from variables
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
@@ -38,10 +38,7 @@ Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 $vThunderRunningIp =  @{}
 $vThunderProcessedIPStr = Get-AutomationVariable -Name vThunderIP
 $agentPrivateIP = Get-AutomationVariable -Name agentPrivateIP
-$vThDefaultPassword = Get-AutomationVariable -Name vThDefaultPassword
-$vThCurrentPassword = Get-AutomationVariable -Name vThLastPass
-$vThNewPassword = Get-AutomationVariable -Name vThPassword
-$isPasswordChangesForAll = Get-AutomationVariable -Name vThNewPassApplyFlag
+$vThNewPassword = Get-AutomationVariable -Name vThNewPassword
 
 function deserializer {
     param (
@@ -83,29 +80,25 @@ foreach($vm in $vms){
 	# if public ip is not present in last running public ip list than apply vThunder config
 	if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
 		Write-Output $vThunderIPAddress "Configuring vthunders instances"
-		$changePasswordParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "oldPassword"= $vThDefaultPassword; "newPassword"= $vThNewPassword}
-		$changePasswordJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Change-Password-Config" -ResourceGroupName $resourceGroupName -Parameters $changePasswordParams -Wait
+		$changePasswordParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Change-Password-Config" -ResourceGroupName $resourceGroupName -Parameters $changePasswordParams -Wait
 
-		$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress; "vThPassword" = $vThNewPassword}
-		$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThPassword" = $vThNewPassword}
-		$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP; "vThPassword" = $vThNewPassword}
-		$slbJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
-		$sslJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
-		$acosEventJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
+		$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
+		$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+		$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
 		$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
 		$uuid =  $glmJob[-1]
 		$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
+		$vThNewPasswordPlanText = "$vThNewPassword"
+		Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
 	}
 	else{
 		Write-Output "Adding/Deleting servers from existing vthunder instances"
-		if($isPasswordChangesForAll -eq "True"){
-			$changePasswordParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "oldPassword"= $vThCurrentPassword; "newPassword"= $vThNewPassword}
-		    $changePasswordJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Change-Password-Config" -ResourceGroupName $resourceGroupName -Parameters $changePasswordParams
-			$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
-			continue
-		}
-		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress; "vThPassword" = $vThNewPassword}
-		$slbJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
 		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 }
@@ -114,7 +107,7 @@ foreach($vm in $vms){
 foreach($oldip in $vThunderProcessedIP.Keys){
     if (-Not $vThunderRunningIp.ContainsKey($oldip)){
 		$glmRevokeParams = @{"vThunderRevokeLicenseUUID"= $vThunderProcessedIP[$oldip]}
-		$glmRevokeJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Revoke-Config" -ResourceGroupName $resourceGroupName -Parameters $glmRevokeParams
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Revoke-Config" -ResourceGroupName $resourceGroupName -Parameters $glmRevokeParams
     }
 }
 
@@ -133,8 +126,7 @@ function serializer {
 $vThunderRunningIpStr = serializer -hashtableValue $vThunderRunningIp
 Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIpStr
 
-$vThNewPasswordPlanText = "$vThNewPassword"
-Set-AutomationVariable -Name "vThLastPass" -Value $vThNewPasswordPlanText
+
 Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value "False"
 
 Write-Output "Done"
