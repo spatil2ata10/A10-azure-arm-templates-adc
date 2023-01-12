@@ -22,8 +22,9 @@ if (($log_action -eq "disable") -and ($metrics_action -eq "disable")){
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
 $azureAutoScaleResources = $azureAutoScaleResources | ConvertFrom-Json
 
-$vThUsername = Get-AutomationVariable -Name vThUsername
-$vThPassword =  Get-AutomationVariable -Name vThPassword
+$vThUserName = Get-AutomationVariable -Name vThUserName
+$vThPassword = Get-AutomationVariable -Name vThCurrentPassword
+$oldPassword = Get-AutomationVariable -Name vThDefaultPassword
 
 if ($null -eq $azureAutoScaleResources) {
     Write-Error "azureAutoScaleResources data is missing." -ErrorAction Stop
@@ -52,17 +53,17 @@ $location = $azureAutoScaleResources.location
 
 function Get-AuthToken {
     <#
-        .PARAMETER BaseUrl
+        .PARAMETER base_url
         Base url of AXAPI
-        .OUTPUTS
-        Authorization token
         .DESCRIPTION
-        Function to get Authorization token
+        Function to get Authorization token from axapi
         AXAPI: /axapi/v3/auth
     #>
     param (
-        $baseUrl
+        $baseUrl,
+        $vThPass
     )
+
     # AXAPI Auth url
     $url = -join($baseUrl, "/auth")
     # AXAPI header
@@ -71,17 +72,28 @@ function Get-AuthToken {
     # AXAPI Auth url json body
     $body = "{
     `n    `"credentials`": {
-    `n        `"username`": `"$vThUsername`",
-    `n        `"password`": `"$vThPassword`"
+    `n        `"username`": `"$vThUserName`",
+    `n        `"password`": `"$vThPass`"
     `n    }
     `n}"
-    # Invoke Auth url
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
-    # fetch Authorization token from response
-    $authorizationToken = $Response.authresponse.signature
+    $maxRetry = 5
+    $currentRetry = 0
+    while ($currentRetry -ne $maxRetry) {
+        # Invoke Auth url
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
+        # fetch Authorization token from response
+        $authorizationToken = $response.authresponse.signature
+        if ($null -eq $authorizationToken) {
+            Write-Error "Retry $currentRetry to get authorization token"
+            $currentRetry++
+            start-sleep -s 60
+        } else {
+            break
+        }
+    }
     if ($null -eq $authorizationToken) {
-        Write-Error "Falied to get authorization token from AXAPI" -ErrorAction Stop
+            Write-Error "Falied to get authorization token from AXAPI" -ErrorAction Stop
     }
     return $authorizationToken
 }
@@ -203,7 +215,11 @@ function WriteMemory {
 
 $vthunderBaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
 # Get Authorization Token
-$authorizationToken = Get-AuthToken -baseUrl $vthunderBaseUrl
+$authorizationToken = Get-AuthToken -baseUrl $vthunderBaseUrl -vThPass $vThPassword
+
+if ($authorizationToken -eq 401){
+    $authorizationToken = Get-AuthToken -baseUrl $vthunderBaseUrl -vThPass $oldPassword
+}
 
 if ($log_action -eq "enable"){
     Write-Output "Function Configure Log called" 
