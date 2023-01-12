@@ -19,12 +19,12 @@ param (
      [Parameter(Mandatory=$True)]
      [String] $vThunderProcessingIP,
      [Parameter(Mandatory=$True)]
-     [String] $agentPrivateIP,
-     [Parameter(Mandatory=$True)]
-     [String] $vThPassword
+     [String] $agentPrivateIP
 )
 
-$vThUsername = Get-AutomationVariable -Name vThUsername
+$vThUserName = Get-AutomationVariable -Name vThUserName
+$vThPassword = Get-AutomationVariable -Name vThCurrentPassword
+$oldPassword = Get-AutomationVariable -Name vThDefaultPassword
 
 function GetAuthToken {
     <#
@@ -37,7 +37,8 @@ function GetAuthToken {
         AXAPI: /axapi/v3/auth
     #>
     param (
-        $baseUrl
+        $baseUrl,
+        $vThPass
     )
     # AXAPI Auth url
     $url = -join($baseUrl, "/auth")
@@ -47,17 +48,28 @@ function GetAuthToken {
     # AXAPI Auth url json body
     $body = "{
     `n    `"credentials`": {
-    `n        `"username`": `"$vThUsername`",
-    `n        `"password`": `"$vThPassword`"
+    `n        `"username`": `"$vThUserName`",
+    `n        `"password`": `"$vThPass`"
     `n    }
     `n}"
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    # Invoke Auth url
-    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
-    # fetch Authorization token from response
-    $authorizationToken = $Response.authresponse.signature
+    $maxRetry = 5
+    $currentRetry = 0
+    while ($currentRetry -ne $maxRetry) {
+        # Invoke Auth url
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+        $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
+        # fetch Authorization token from response
+        $authorizationToken = $response.authresponse.signature
+        if ($null -eq $authorizationToken) {
+            Write-Error "Retry $currentRetry to get authorization token"
+            $currentRetry++
+            start-sleep -s 60
+        } else {
+            break
+        }
+    }
     if ($null -eq $authorizationToken) {
-        Write-Error "Falied to get authorization token from AXAPI" -ErrorAction Stop
+            Write-Error "Falied to get authorization token from AXAPI" -ErrorAction Stop
     }
     return $authorizationToken
 }
@@ -309,7 +321,11 @@ function WriteMemory {
 
 $vthunderBaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
 
-$authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl
+$authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $vThPassword
+
+if ($authorizationToken -eq 401){
+    $authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $oldPassword
+}
 
 AcosEventsMessageSelector -baseUrl $vthunderBaseUrl -authorizationToken $authorizationToken
 
