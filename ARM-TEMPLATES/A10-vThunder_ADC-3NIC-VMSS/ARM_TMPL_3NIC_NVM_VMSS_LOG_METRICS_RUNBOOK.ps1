@@ -12,6 +12,17 @@ $metrics_action = $azureLogMetrics.metrics_action
 $cpu_metrics = $azureLogMetrics.cpu_metrics
 $memory_metrics = $azureLogMetrics.memory_metrics
 $disk_metrics = $azureLogMetrics.disk_metrics
+$throughput_metrics = $azureLogMetrics.throughput_metrics
+$interfaces_metrics = $azureLogMetrics.interfaces_metrics
+$cps_metrics = $azureLogMetrics.cps_metrics
+$tps_metrics = $azureLogMetrics.tps_metrics
+$server_down_count_metrics = $azureLogMetrics.server_down_count_metrics
+$server_down_percentage_metrics = $azureLogMetrics.server_down_percentage_metrics
+$ssl_cert_metrics = $azureLogMetrics.ssl_cert_metrics
+$server_error_metrics = $azureLogMetrics.server_error_metrics
+$sessions_metrics = $azureLogMetrics.sessions_metrics
+$packet_drop_metrics = $azureLogMetrics.packet_drop_metrics
+$packet_rate_metrics = $azureLogMetrics.packet_rate_metrics
 
 if (($log_action -eq "disable") -and ($metrics_action -eq "disable")){
     Write-Output "Log Metrics are disable"
@@ -51,19 +62,20 @@ $vmssResourceId = Get-AutomationVariable -Name vmssResourceId
 $location = $azureAutoScaleResources.location
 
 
-function Get-AuthToken {
+function GetAuthToken {
     <#
-        .PARAMETER base_url
+        .PARAMETER BaseUrl
         Base url of AXAPI
+        .OUTPUTS
+        Authorization token
         .DESCRIPTION
-        Function to get Authorization token from axapi
+        Function to get Authorization token
         AXAPI: /axapi/v3/auth
     #>
     param (
         $baseUrl,
         $vThPass
     )
-
     # AXAPI Auth url
     $url = -join($baseUrl, "/auth")
     # AXAPI header
@@ -172,7 +184,18 @@ function ConfigureMetrics {
     `n        `"location`": `"$location`",
     `n        `"cpu`": `"$cpu_metrics`",
     `n        `"disk`": `"$disk_metrics`",
-    `n        `"memory`": `"$memory_metrics`"
+    `n        `"memory`": `"$memory_metrics`",
+    `n        `"throughput`": `"$throughput_metrics`",
+    `n        `"interfaces`": `"$interfaces_metrics`",
+    `n        `"cps`": `"$cps_metrics`",
+    `n        `"tps`": `"$tps_metrics`",
+    `n        `"server-down-count`": `"$server_down_count_metrics`",
+    `n        `"server-down-percentage`": `"$server_down_percentage_metrics`",
+    `n        `"ssl-cert`": `"$ssl_cert_metrics`",
+    `n        `"server-error`": `"$server_error_metrics`",
+    `n        `"sessions`": `"$sessions_metrics`",
+    `n        `"packet-drop`": `"$packet_drop_metrics`",
+    `n        `"packet-rate`": `"$packet_rate_metrics`"
     `n    }
     `n}"
 
@@ -215,10 +238,10 @@ function WriteMemory {
 
 $vthunderBaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
 # Get Authorization Token
-$authorizationToken = Get-AuthToken -baseUrl $vthunderBaseUrl -vThPass $vThPassword
+$authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $vThPassword
 
 if ($authorizationToken -eq 401){
-    $authorizationToken = Get-AuthToken -baseUrl $vthunderBaseUrl -vThPass $oldPassword
+    $authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $oldPassword
 }
 
 if ($log_action -eq "enable"){
