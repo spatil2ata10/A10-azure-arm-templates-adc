@@ -485,37 +485,17 @@ function WriteMemory {
     #>
     param (
         $BaseUrl,
-        $authorizationToken
+        $AuthorizationToken
     )
-    $Url = -join($BaseUrl, "/active-partition")
-    $Headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $Headers.Add("Authorization", -join("A10 ", $authorizationToken))
-    $Headers.Add("Content-Type", "application/json")
+    $Url = -join($BaseUrl, "/write/memory")
+
+    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+    $headers.Add("Content-Type", "application/json")
+    $headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
+
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -Uri $Url -Method 'GET' -Headers $Headers
-    $partition = $response.'active-partition'.'partition-name'
+    $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $headers
 
-    if ($null -eq $partition) {
-        Write-Error "Failed to get partition name"
-    } else {
-        $Url = -join($BaseUrl, "/write/memory")
-        $Headers1 = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-        $Headers1.Add("Authorization", -join("A10 ", $authorizationToken))
-        $Headers1.Add("Content-Type", "application/json")
-
-        $body = "{
-        `n  `"memory`": {
-        `n    `"partition`": `"$partition`"
-        `n  }
-        `n}"
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-        $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $Headers1 -Body $body
-        if ($null -eq $response) {
-            Write-Error "Failed to run write memory command"
-        } else {
-            Write-Host "Configurations are saved on partition: "$partition
-        }
-    }
 }
 
 # get all server instances
