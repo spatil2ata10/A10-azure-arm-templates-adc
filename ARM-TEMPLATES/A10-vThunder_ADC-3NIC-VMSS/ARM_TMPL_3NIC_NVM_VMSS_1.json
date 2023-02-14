@@ -226,7 +226,15 @@
          "metadata": {
             "description": "String used as a base for naming resources. Must be 0-265 characters in length and globally unique across Azure. A hash is prepended to this string for some resources, and resource-specific information is appended."
          }
-      }
+      },
+      "logAnalyticsWorkspaceName": {
+         "type": "string",
+         "minLength": 3,
+         "maxLength": 61,
+         "metadata": {
+              "description": "String used as a base for naming resources. Must be 3-61 characters in length and globally unique across Azure. A hash is prepended to this string for some resources, and resource-specific information is appended."
+           }
+       }
    },
    "variables":{
       "namingInfix":"[toLower(parameters('vmssName'))]",
@@ -263,7 +271,7 @@
       "lbHealthProbe53ID": "[resourceId('Microsoft.Network/loadBalancers/probes',variables('lbName'), variables('lbHealthProbe53Name'))]",
       "agentPubIPName":"vth-agent-nic-ip",
       "agentNIName":"vth-agent-nic",
-      "workspaceName":"vth-vmss-log-workspace",
+      "workspaceName":"[parameters('logAnalyticsWorkspaceName')]",
       "workspaceSku":"pergb2018",
       "appInsightsName":"vth-vmss-app-insights",
       "_artifactsLocation":"[parameters('artifactsLocation')]",
@@ -274,7 +282,8 @@
       "PSEventConfigRunbookDescription": "Runbook to apply event config for all vThunder",
       "PSGLMConfigRunbookDescription": "Runbook to glm config for all vThunder",
       "PSGLMRevokeConfigRunbookDescription": "Runbook to revoke glm for deleted vThunder",
-      "PSChangePasswordConfigRunbookDescription": "Runbook to change password for all vThunder"
+      "PSChangePasswordConfigRunbookDescription": "Runbook to change password for all vThunder",
+      "PSLogMetricsConfigRunbookDescription": "Runbook to config log and metrics for all vThunder"
    },
    "resources":[
       {
@@ -991,7 +1000,26 @@
                "version": "1.0.0.0"
              }
            }
-         }
+         },
+         {
+            "type": "runbooks",
+            "apiVersion": "2020-01-13-preview",
+            "name": "Log-Metrics-Config",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+              "[resourceId('Microsoft.Automation/automationAccounts', parameters('automationAccountName'))]"
+            ],
+            "properties": {
+              "runbookType": "PowerShell",
+              "logProgress": "false",
+              "logVerbose": "false",
+              "description": "[variables('PSLogMetricsConfigRunbookDescription')]",
+              "publishContentLink": {
+                "uri": "[uri(variables('_artifactsLocation'), concat('ARM_TMPL_3NIC_NVM_VMSS_LOG_METRICS_RUNBOOK.ps1', variables('_artifactsLocationSasToken')))]",
+                "version": "1.0.0.0"
+              }
+            }
+          }
        ]
      }
    ]
