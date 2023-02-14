@@ -8,13 +8,15 @@
     "appId": "10724xxx-xxx-xxxx-xxxx-xxxx2c14726d",
     "tenantId": "91d27xxx-xxxx-xxxx-xxxx-xxxxf81fcb2f",
     "masterWebhookUrl": "<master-runbook-webhook-url>",
-    "location": "South Central US"
+    "location": "South Central US",
+    "logAnalyticsWorkspaceName": "vth-vmss-log-workspace"
   },
   "glmParam": {
     "userName": "youremail@a10networks.com",
     "userPassword": "your_password",
     "entitlementToken": "A10xxa2fxxxx",
     "licenseId": "59xxx"
+
   },
   "sslParam": {
     "requestTimeout": 40,
@@ -72,11 +74,23 @@
       "ip-dest-addr":"0.0.0.0",
       "ip-mask":"/0",
       "ip-nexthop-ipv4": [
-          {
-          "ip-next-hop":"10.0.2.1"
-          }
+        {
+        "ip-next-hop":"10.0.2.1"
+        },
+        {
+          "ip-next-hop":"10.0.1.1"
+        }
       ]
-      }
+      },
+      {
+      "ip-dest-addr":"8.8.8.8",
+      "ip-mask":"/32",
+      "ip-nexthop-ipv4": [
+        {
+          "ip-next-hop":"10.0.1.1"
+        }
+      ]
+     }
     ]
   },
   "autoScaleParam": {
@@ -85,10 +99,28 @@
     "scaleInThreshold": 25,
     "scaleOutThreshold": 80
   },
-  "vThunderIP": {},
+  "azureLogMetricsParam": {
+    "log_action": "enable",
+    "metrics_action": "enable",
+    "cpu_metrics": "enable",
+    "memory_metrics": "enable",
+    "disk_metrics": "enable",
+    "throughput_metrics": "enable",
+    "interfaces_metrics": "enable",
+    "cps_metrics": "enable",
+    "tps_metrics": "enable",
+    "server_down_count_metrics": "enable",
+    "server_down_percentage_metrics": "enable",
+    "ssl_cert_metrics": "enable",
+    "server_error_metrics": "enable",
+    "sessions_metrics": "enable",
+    "packet_drop_metrics": "enable",
+    "packet_rate_metrics": "enable"
+  },
+  "vThunderIP": "",
   "vCPUUsage": {},
-  "clientSecret": "9-xxx~jIxxxEVyxxxxHNxxxOwv_xxxxZLxxxTM",
+  "clientSecret": "78xxxx9xxxxxxxxxxxxxxxcxxxxxxchC",
   "agentPrivateIP": "10.0.1.4",
-  "vThUsername": "admin",
-  "vThPassword": "a10"
+  "vThUserName": "admin",
+  "vThNewPassApplyFlag": "False"
 }
