@@ -87,10 +87,13 @@
          "value": "vth-agent-cont"
       },
       "automationAccountName": {
-         "value": "10.0.1.4"
+         "value": "vth-amt-acc"
       },
       "artifactsLocation": {
          "value": "https://raw.githubusercontent.com/spatil2ata10/A10-azure-arm-templates-adc/FEATURE/v1.0_2022/ARM-TEMPLATES/A10-vThunder_ADC-3NIC-VMSS/ARM_TMPL_3NIC_NVM_VMSS_1.json"
+      },
+      "logAnalyticsWorkspaceName": {
+         "value": "vth-vmss-log-workspace"
       }
    }
 }
