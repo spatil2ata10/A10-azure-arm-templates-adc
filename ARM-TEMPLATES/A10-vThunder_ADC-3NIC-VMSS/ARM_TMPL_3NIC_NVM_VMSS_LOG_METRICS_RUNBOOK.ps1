@@ -1,45 +1,41 @@
+<#
+.Description
+    Script for applying vThunder configuration.
+	1. SLB
+	2. GLM
+	3. SSL
+	4. Revoke GLM License.
+	5. Acos Event
+	6. Log Matrice
+#>
+
 param (
-    [Parameter(Mandatory=$True)]
-    [String] $vThunderProcessingIP,
-    [Parameter(Mandatory=$True)]
-    [String] $vThunderResourceId
+    [Parameter(Mandatory=$false)]
+    [object] $WebhookData
 )
 
-$azureLogMetrics = Get-AutomationVariable -Name azureLogMetricsParam
-$azureLogMetrics = $azureLogMetrics | ConvertFrom-Json
-$log_action = $azureLogMetrics.log_action
-$metrics_action = $azureLogMetrics.metrics_action
-$cpu_metrics = $azureLogMetrics.cpu_metrics
-$memory_metrics = $azureLogMetrics.memory_metrics
-$disk_metrics = $azureLogMetrics.disk_metrics
-$throughput_metrics = $azureLogMetrics.throughput_metrics
-$interfaces_metrics = $azureLogMetrics.interfaces_metrics
-$cps_metrics = $azureLogMetrics.cps_metrics
-$tps_metrics = $azureLogMetrics.tps_metrics
-$server_down_count_metrics = $azureLogMetrics.server_down_count_metrics
-$server_down_percentage_metrics = $azureLogMetrics.server_down_percentage_metrics
-$ssl_cert_metrics = $azureLogMetrics.ssl_cert_metrics
-$server_error_metrics = $azureLogMetrics.server_error_metrics
-$sessions_metrics = $azureLogMetrics.sessions_metrics
-$packet_drop_metrics = $azureLogMetrics.packet_drop_metrics
-$packet_rate_metrics = $azureLogMetrics.packet_rate_metrics
+$Payload = $WebhookData.RequestBody | ConvertTo-Json -Depth 6
+$Payload = $Payload.ToString().replace('\"', '"')
+$Payload = $Payload.replace('"{', '{')
+$Payload = $Payload.replace('}"', '}')
+$Payload = $Payload | ConvertFrom-Json
 
-if (($log_action -eq "disable") -and ($metrics_action -eq "disable")){
-    Write-Output "Log Metrics are disable"
-    Exit
-}
 
-# Get resource config from variables
+# Wait till vThunder is Up.
+start-sleep -s 180
+
+# Get the resource config from variables
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
 $azureAutoScaleResources = $azureAutoScaleResources | ConvertFrom-Json
-
-$vThUserName = Get-AutomationVariable -Name vThUserName
-$vThPassword = Get-AutomationVariable -Name vThCurrentPassword
-$oldPassword = Get-AutomationVariable -Name vThDefaultPassword
 
 if ($null -eq $azureAutoScaleResources) {
     Write-Error "azureAutoScaleResources data is missing." -ErrorAction Stop
 }
+
+# Get variables value
+$automationAccountName = $azureAutoScaleResources.automationAccountName
+$resourceGroupName = $azureAutoScaleResources.resourceGroupName
+$vThunderScaleSetName = $azureAutoScaleResources.vThunderScaleSetName
 
 # Authenticate with Azure Portal
 $appId = $azureAutoScaleResources.appId
@@ -48,213 +44,124 @@ $tenantId = $azureAutoScaleResources.tenantId
 
 $secureStringPwd = $secret | ConvertTo-SecureString -AsPlainText -Force
 $pscredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $appId, $secureStringPwd
-Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
+$connectResponse = Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 
-# Get variables
-#log analytics workspace id
-$workspaceId = Get-AutomationVariable -Name workspaceId
-#log analytics shared key
-$sharedKey = Get-AutomationVariable -Name sharedKey
+if ($null -eq $connectResponse) {
+	Write-Output "Failed to connect Azure Portal, retrying..."
+	# Authenticate with Azure Portal
+	$appId = $azureAutoScaleResources.appId
+	$secret = Get-AutomationVariable -Name clientSecret
+	$tenantId = $azureAutoScaleResources.tenantId
 
-#vmss resource Id
-$vmssResourceId = Get-AutomationVariable -Name vmssResourceId
-#location
-$location = $azureAutoScaleResources.location
+	$secureStringPwd = $secret | ConvertTo-SecureString -AsPlainText -Force
+	$pscredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $appId, $secureStringPwd
+	$connectResponse = Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
 
+	if ($null -eq $connectResponse) {
+		Write-Error "Failed to connect Azure Portal" -ErrorAction Stop
+	}
+}
 
-function GetAuthToken {
-    <#
-        .PARAMETER BaseUrl
-        Base url of AXAPI
-        .OUTPUTS
-        Authorization token
-        .DESCRIPTION
-        Function to get Authorization token
-        AXAPI: /axapi/v3/auth
-    #>
+# Defining running IP object
+$vThunderRunningIp =  @{}
+$vThunderProcessedIPStr = Get-AutomationVariable -Name vThunderIP
+$agentPrivateIP = Get-AutomationVariable -Name agentPrivateIP
+$vThNewPassword = Get-AutomationVariable -Name vThNewPassword
+
+function deserializer {
     param (
-        $baseUrl,
-        $vThPass
+        $stringValue
     )
-    # AXAPI Auth url
-    $url = -join($baseUrl, "/auth")
-    # AXAPI header
-    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $headers.Add("Content-Type", "application/json")
-    # AXAPI Auth url json body
-    $body = "{
-    `n    `"credentials`": {
-    `n        `"username`": `"$vThUserName`",
-    `n        `"password`": `"$vThPass`"
-    `n    }
-    `n}"
-    $maxRetry = 5
-    $currentRetry = 0
-    while ($currentRetry -ne $maxRetry) {
-        # Invoke Auth url
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-        $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
-        # fetch Authorization token from response
-        $authorizationToken = $response.authresponse.signature
-        if ($null -eq $authorizationToken) {
-            Write-Error "Retry $currentRetry to get authorization token"
-            $currentRetry++
-            start-sleep -s 60
-        } else {
-            break
+    $hashTable = @{}
+    $splitValue = $stringValue.Split(";")
+    foreach($keyValue in $splitValue[0..($splitValue.Length-2)]){
+        $keyValue = $keyValue.Trim()
+        $keyValue = $keyValue.Split("=")
+        if ($null -eq $keyValue[0] -or "" -eq $keyValue[0]){
+            continue
         }
+        $hashTable.Add($keyValue[0],$keyValue[1])
     }
-    if ($null -eq $authorizationToken) {
-            Write-Error "Falied to get authorization token from AXAPI" -ErrorAction Stop
-    }
-    return $authorizationToken
+    return $hashTable
 }
 
-function ConfigureLog {
-    <#
-        .PARAMETER BaseUrl
-        Base url of AXAPI
-        .PARAMETER AuthorizationToken
-        AXAPI authorization token
-        .DESCRIPTION
-        Function to configure Cloud Services
-        AXAPI: /axapi/v3/cloud-services/cloud-provider
-    #>
+$vThunderProcessedIP = deserializer -stringValue $vThunderProcessedIPStr
+
+# Get list of vm from vmss
+$vms = Get-AzVmssVM -ResourceGroupName $resourceGroupName -VMScaleSetName $vThunderScaleSetName
+
+# Get public ip address of each vm
+foreach($vm in $vms){
+	# get interface and check public ip address
+	$interfaceId = $vm.NetworkProfile.NetworkInterfaces[0].Id
+	$interfaceName = $interfaceId.Split('/')[-1]
+
+	$interfaceConfig = Get-AzNetworkInterface -ResourceGroupName $resourceGroupName -Name $interfaceName -VirtualMachineScaleSetName $vThunderScaleSetName -VirtualMachineIndex $vm.InstanceId
+
+	$publicIpConfig =  Get-AzPublicIpAddress -ResourceGroupName $resourceGroupName -VirtualMachineScaleSetName $vThunderScaleSetName -NetworkInterfaceName $interfaceConfig.name -IpConfigurationName $interfaceConfig.IpConfigurations[0].Name -VirtualMachineIndex $vm.InstanceId
+	$vThunderIPAddress = $publicIpConfig.IpAddress
+	# check for public ip excepetion
+	if($vThunderIPAddress -eq "Not Assigned"){
+		continue
+	}
+
+	# Check if vThunder is autoscaling
+	if (($Payload.operation -eq "Scale Out") -and ($Payload.context.resourceName -eq $vThunderScaleSetName)) {
+		# if public ip is not present in last running public ip list than apply vThunder config
+		if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
+			Write-Output $vThunderIPAddress "Configuring vthunders instances"
+			$changePasswordParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Change-Password-Config" -ResourceGroupName $resourceGroupName -Parameters $changePasswordParams -Wait
+
+			$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
+			$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+			$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
+			$acosLogMetricsParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThunderResourceId"= $vm.Id}
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Log-Metrics-Config" -ResourceGroupName $resourceGroupName -Parameters $acosLogMetricsParams
+			$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
+			$uuid =  $glmJob[-1]
+			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
+			$vThNewPasswordPlanText = "$vThNewPassword"
+			Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
+		}
+	}
+	
+	# Check if server is autoscaling
+	if (($WebhookData.RequestBody.operation -eq "Scale Out") -and ($WebhookData.RequestBody.context.resourceName -eq $serverScaleSetName)) {
+		Write-Output "Adding/Deleting servers from existing vthunder instances"
+		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
+	}
+}
+
+# revoke glm
+foreach($oldip in $vThunderProcessedIP.Keys){
+    if (-Not $vThunderRunningIp.ContainsKey($oldip)){
+		$glmRevokeParams = @{"vThunderRevokeLicenseUUID"= $vThunderProcessedIP[$oldip]}
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Revoke-Config" -ResourceGroupName $resourceGroupName -Parameters $glmRevokeParams
+    }
+}
+
+function serializer {
     param (
-        $BaseUrl,
-        $AuthorizationToken
+        $hashtableValue
     )
-    
-    $url = -join($BaseUrl, "/cloud-services/cloud-provider/azure/log")
-    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
-    $headers.Add("Content-Type", "application/json")
-
-    $body = "{
-    `n`"log`":
-    `n    {
-    `n    `"action`": `"$log_action`",
-    `n    `"customer-id`" : `"$workspaceId`",
-    `n    `"shared-key`": `"$sharedKey`",
-    `n    `"resource-id`": `"$vThunderResourceId`"
-    `n    }
-    `n}"
-
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
-    $response | ConvertTo-Json
-
-    if ($null -eq $response) {
-        Write-Error "Failed to configure log services"
-    } else {
-        Write-Host "Configured log services"
+    $stringValue = ""
+    foreach($key in $hashtableValue.Keys){
+        $value = $hashtableValue[$key]
+        $stringValue = $stringValue+"$key=$value;"
     }
+    return $stringValue
 }
 
-function ConfigureMetrics {
-    <#
-        .PARAMETER BaseUrl
-        Base url of AXAPI
-        .PARAMETER AuthorizationToken
-        AXAPI authorization token
-        .DESCRIPTION
-        Function to configure Cloud Services
-        AXAPI: /axapi/v3/cloud-services/cloud-provider
-    #>
-    param (
-        $BaseUrl,
-        $AuthorizationToken
-    )
-    
-    $url = -join($BaseUrl, "/cloud-services/cloud-provider/azure/metrics")
-   
-    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
-    $headers.Add("Content-Type", "application/json")
-    
-    $location = $location.ToLower().Replace(" ","")
+$vThunderRunningIpStr = serializer -hashtableValue $vThunderRunningIp
+Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIpStr
 
-    $body = "{
-    `n`"metrics`": {
-    `n        `"action`": `"$metrics_action`",
-    `n        `"client-id`": `"$appId`",
-    `n        `"tenant-id`": `"$tenantId`",
-    `n        `"secret-id`": `"$secret`",
-    `n        `"resource-id`": `"$vmssResourceId`",
-    `n        `"location`": `"$location`",
-    `n        `"cpu`": `"$cpu_metrics`",
-    `n        `"disk`": `"$disk_metrics`",
-    `n        `"memory`": `"$memory_metrics`",
-    `n        `"throughput`": `"$throughput_metrics`",
-    `n        `"interfaces`": `"$interfaces_metrics`",
-    `n        `"cps`": `"$cps_metrics`",
-    `n        `"tps`": `"$tps_metrics`",
-    `n        `"server-down-count`": `"$server_down_count_metrics`",
-    `n        `"server-down-percentage`": `"$server_down_percentage_metrics`",
-    `n        `"ssl-cert`": `"$ssl_cert_metrics`",
-    `n        `"server-error`": `"$server_error_metrics`",
-    `n        `"sessions`": `"$sessions_metrics`",
-    `n        `"packet-drop`": `"$packet_drop_metrics`",
-    `n        `"packet-rate`": `"$packet_rate_metrics`"
-    `n    }
-    `n}"
 
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -Uri $url -Method 'POST' -Headers $headers -Body $body
-    $response | ConvertTo-Json
+Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value "False"
 
-    if ($null -eq $response) {
-        Write-Error "Failed to configure metrics services"
-    } else {
-        Write-Host "Configured metrics services"
-    }
-}
-
-function WriteMemory {
-    <#
-        .PARAMETER BaseUrl
-        Base url of AXAPI
-        .PARAMETER AuthorizationToken
-        AXAPI authorization token
-        .DESCRIPTION
-        Function to save configurations on active partition
-        AXAPI: /axapi/v3/active-partition
-        AXAPI: /axapi/v3/write/memory
-    #>
-    param (
-        $BaseUrl,
-        $AuthorizationToken
-    )
-    $Url = -join($BaseUrl, "/write/memory")
-
-    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $headers.Add("Content-Type", "application/json")
-    $headers.Add("Authorization", -join("A10 ", $AuthorizationToken))
-
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-    $response = Invoke-RestMethod -Uri $Url -Method 'POST' -Headers $headers
-
-}
-
-$vthunderBaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
-# Get Authorization Token
-$authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $vThPassword
-
-if ($authorizationToken -eq 401){
-    $authorizationToken = GetAuthToken -baseUrl $vthunderBaseUrl -vThPass $oldPassword
-}
-
-if ($log_action -eq "enable"){
-    Write-Output "Function Configure Log called" 
-    ConfigureLog -BaseUrl $vthunderBaseUrl -AuthorizationToken $authorizationToken
-}
-
-if ($metrics_action -eq "enable"){
-    Write-Output "Function Configure Metrics called" 
-    ConfigureMetrics -BaseUrl $vthunderBaseUrl -AuthorizationToken $authorizationToken
-}
-
-WriteMemory -BaseUrl $vthunderBaseUrl -AuthorizationToken $authorizationToken
-Write-Host "WriteMemory "
-
-Write-Host "apply Cloud-Services"
+Write-Output "Done"
