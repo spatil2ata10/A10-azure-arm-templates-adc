@@ -116,9 +116,11 @@ foreach($vm in $vms){
 			$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
 			$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
 			$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
+			$acosLogMetricsParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThunderResourceId"= $vm.Id}
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Log-Metrics-Config" -ResourceGroupName $resourceGroupName -Parameters $acosLogMetricsParams
 			$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
 			$uuid =  $glmJob[-1]
 			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
