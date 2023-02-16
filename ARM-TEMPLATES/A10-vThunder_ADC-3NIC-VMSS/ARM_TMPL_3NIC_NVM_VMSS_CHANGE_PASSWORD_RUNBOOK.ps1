@@ -197,7 +197,24 @@ function GetVMIPs {
 }
 
 # check if request for all vthunder password change is true
-if(($isPasswordChangesForAll -eq "TRUE") -and (!$vThunderProcessingIP)){
+if ($vThunderProcessingIP) {
+    $vthunderbaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
+    $authorizationToken = GetAuthToken -baseUrl $vthunderbaseUrl -vThunderPassword $vThDefaultPassword
+    $status = ChangedAdminPassword -baseUrl $vthunderbaseUrl -authorizationToken $authorizationToken -vThunderPassword $vThCurrentPassword
+    WriteMemory -baseUrl $vthunderbaseUrl -authorizationToken $authorizationToken
+
+    if ($status -eq 200) {
+        Write-Output "Password changed successfully for vThunder $vThunderProcessingIP"
+    } else {
+        Write-Error "Failed to change password for vThunder $vThunderProcessingIP"
+    }
+    # If Current password not equal to new password, 
+    # then update current password to new password
+    # if ($vThCurrentPassword -ne $vThNewPassword) {
+    #     Write-Output "Current password is not same as new password, updating new password to current password."
+    #     Set-AutomationVariable -Name "vThNewPassword" -Value $vThCurrentPassword.ToString()
+    # }
+} elseif ($isPasswordChangesForAll -eq "TRUE"){
     # check if current and new password is different
     if($vThCurrentPassword -ne $vThNewPassword){
         # call get vm ips
@@ -214,53 +231,37 @@ if(($isPasswordChangesForAll -eq "TRUE") -and (!$vThunderProcessingIP)){
                 Write-Error "Failed to change password for vThunder $vthunderIP"
             }
         }  
-    }
+    
+        # Update current password to new password
+        Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPassword.ToString()
+        start-sleep -s 10
+        $vThCurrentPassword = Get-AutomationVariable -Name vThCurrentPassword
 
-    # Update current password to new password
-    Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPassword.ToString()
-    start-sleep -s 10
-    $vThCurrentPassword = Get-AutomationVariable -Name vThCurrentPassword
-
-    # Retry to update current password to new password
-    if ($vThCurrentPassword -ne $vThNewPassword) {
-        $maxRetry = 5
-        $currentRetry = 0
-        while ($currentRetry -lt $maxRetry) {
-            Write-Output "Failed to update current password, retrying..."
-            Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPassword.ToString()
-            start-sleep -s 10
-            $vThCurrentPassword = Get-AutomationVariable -Name vThCurrentPassword
-            if ($vThCurrentPassword -eq $vThNewPassword) {
-                Write-Output "Updated current password to new password successfully."
-                break
+        # Retry to update current password to new password
+        if ($vThCurrentPassword -ne $vThNewPassword) {
+            $maxRetry = 5
+            $currentRetry = 0
+            while ($currentRetry -lt $maxRetry) {
+                Write-Output "Failed to update current password, retrying..."
+                Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPassword.ToString()
+                start-sleep -s 10
+                $vThCurrentPassword = Get-AutomationVariable -Name vThCurrentPassword
+                if ($vThCurrentPassword -eq $vThNewPassword) {
+                    Write-Output "Updated current password to new password successfully."
+                    # Update flag
+                    $isPasswordChangesForAll = 'FALSE'
+                    Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value $isPasswordChangesForAll
+                    break
+                }
+                $currentRetry++
             }
-            $currentRetry++
+        } else {
+            Write-Output "Updated current password to new password successfully."
+            # Update flag
+            $isPasswordChangesForAll = 'FALSE'
+            Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value $isPasswordChangesForAll
         }
-    } else {
-        Write-Output "Updated current password to new password successfully."
-    }
-
-    # Update flag
-    $isPasswordChangesForAll = 'FALSE'
-    Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value $isPasswordChangesForAll
-} elseif (($isPasswordChangesForAll -eq "FALSE") -and ($vThunderProcessingIP)) {
-    $vthunderbaseUrl = -join("https://", $vThunderProcessingIP, "/axapi/v3")
-    $authorizationToken = GetAuthToken -baseUrl $vthunderbaseUrl -vThunderPassword $vThDefaultPassword
-    $status = ChangedAdminPassword -baseUrl $vthunderbaseUrl -authorizationToken $authorizationToken -vThunderPassword $vThCurrentPassword
-    WriteMemory -baseUrl $vthunderbaseUrl -authorizationToken $authorizationToken
-
-    if ($status -eq 200) {
-        Write-Output "Password changed successfully for vThunder $vThunderProcessingIP"
-    } else {
-        Write-Error "Failed to change password for vThunder $vThunderProcessingIP"
-    }
-
-    # If Current password not equal to new password, 
-    # then update current password to new password
-    if ($vThCurrentPassword -ne $vThNewPassword) {
-        Write-Output "Current password is not same as new password, updating new password to current password."
-        Set-AutomationVariable -Name "vThNewPassword" -Value $vThCurrentPassword.ToString()
     }
 } else {
-    Write-Output "No change password action is taken."
+        Write-Output "Invalid action, try again..."
 }
