@@ -15,11 +15,16 @@ param (
 )
 
 $Payload = $WebhookData.RequestBody | ConvertTo-Json -Depth 6
+$Payload = $Payload.ToString().replace('\r\n', '')
 $Payload = $Payload.ToString().replace('\"', '"')
 $Payload = $Payload.replace('"{', '{')
 $Payload = $Payload.replace('}"', '}')
 $Payload = $Payload | ConvertFrom-Json
+$operation = $Payload.operation
+$resourceName = $Payload.context.resourceName
 
+Write-Output "Operation: $operation"
+Write-Output "resourceName: $resourceName"
 
 # Wait till vThunder is Up.
 start-sleep -s 180
@@ -105,8 +110,9 @@ foreach($vm in $vms){
 		continue
 	}
 
+	$scaleOut = $false
 	# Check if vThunder is autoscaling
-	if (($Payload.operation -eq "Scale Out") -and ($Payload.context.resourceName -eq $vThunderScaleSetName)) {
+	if (($operation -eq "Scale Out") -and ($resourceName -eq $vThunderScaleSetName)) {
 		# if public ip is not present in last running public ip list than apply vThunder config
 		if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
 			Write-Output $vThunderIPAddress "Configuring vthunders instances"
@@ -116,24 +122,28 @@ foreach($vm in $vms){
 			$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
 			$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
 			$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
-			$acosLogMetricsParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThunderResourceId"= $vm.Id}
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
-			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Log-Metrics-Config" -ResourceGroupName $resourceGroupName -Parameters $acosLogMetricsParams
 			$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
 			$uuid =  $glmJob[-1]
 			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
 			$vThNewPasswordPlanText = "$vThNewPassword"
 			Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
+			Write-output "new ip $vThunderIPAddress adding into list"
+			$scaleOut = $true
 		}
 	}
 	
 	# Check if server is autoscaling
-	if (($WebhookData.RequestBody.operation -eq "Scale Out") -and ($WebhookData.RequestBody.context.resourceName -eq $serverScaleSetName)) {
+	if ((($operation -eq "Scale Out") -or ($operation -eq "Scale In")) -and ($resourceName -eq $serverScaleSetName)) {
 		Write-Output "Adding/Deleting servers from existing vthunder instances"
 		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
 		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+	}
+
+	if (-not $scaleOut){
+		Write-output "old ip $vThunderIPAddress adding into list"
 		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 }
