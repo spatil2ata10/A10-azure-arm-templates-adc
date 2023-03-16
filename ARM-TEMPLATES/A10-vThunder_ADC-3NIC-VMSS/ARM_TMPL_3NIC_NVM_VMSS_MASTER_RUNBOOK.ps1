@@ -15,16 +15,11 @@ param (
 )
 
 $Payload = $WebhookData.RequestBody | ConvertTo-Json -Depth 6
-$Payload = $Payload.ToString().replace('\r\n', '')
 $Payload = $Payload.ToString().replace('\"', '"')
 $Payload = $Payload.replace('"{', '{')
 $Payload = $Payload.replace('}"', '}')
 $Payload = $Payload | ConvertFrom-Json
-$operation = $Payload.operation
-$resourceName = $Payload.context.resourceName
 
-Write-Output "Operation: $operation"
-Write-Output "resourceName: $resourceName"
 
 # Wait till vThunder is Up.
 start-sleep -s 180
@@ -41,7 +36,6 @@ if ($null -eq $azureAutoScaleResources) {
 $automationAccountName = $azureAutoScaleResources.automationAccountName
 $resourceGroupName = $azureAutoScaleResources.resourceGroupName
 $vThunderScaleSetName = $azureAutoScaleResources.vThunderScaleSetName
-$serverScaleSetName = $azureAutoScaleResources.serverScaleSetName
 
 # Authenticate with Azure Portal
 $appId = $azureAutoScaleResources.appId
@@ -112,7 +106,7 @@ foreach($vm in $vms){
 	}
 
 	# Check if vThunder is autoscaling
-	if (($operation -eq "Scale Out") -and ($resourceName -eq $vThunderScaleSetName)) {
+	if (($Payload.operation -eq "Scale Out") -and ($Payload.context.resourceName -eq $vThunderScaleSetName)) {
 		# if public ip is not present in last running public ip list than apply vThunder config
 		if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
 			Write-Output $vThunderIPAddress "Configuring vthunders instances"
@@ -132,19 +126,11 @@ foreach($vm in $vms){
 			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
 			$vThNewPasswordPlanText = "$vThNewPassword"
 			Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
-		} else {
-			# case when Ip is not from new scale out vThunder but is Ip of configured vThunder
-			$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 		}
-	}
-
-	# Update vThunderRunningIp variable in case of vThunder scale in
-	if (($operation -eq "Scale In") -and ($resourceName -eq $vThunderScaleSetName)) {
-		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 	
 	# Check if server is autoscaling
-	if ((($operation -eq "Scale Out") -or ($operation -eq "Scale In")) -and ($resourceName -eq $serverScaleSetName)) {
+	if (($WebhookData.RequestBody.operation -eq "Scale Out") -and ($WebhookData.RequestBody.context.resourceName -eq $serverScaleSetName)) {
 		Write-Output "Adding/Deleting servers from existing vthunder instances"
 		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
 		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
@@ -153,8 +139,6 @@ foreach($vm in $vms){
 }
 
 # revoke glm
-# Check if vThunder IP address is present in vThunderProcessedIP variable but not present
-# in vThunderRunningIp varibale then execute revoke glm for that missing vThunder
 foreach($oldip in $vThunderProcessedIP.Keys){
     if (-Not $vThunderRunningIp.ContainsKey($oldip)){
 		$glmRevokeParams = @{"vThunderRevokeLicenseUUID"= $vThunderProcessedIP[$oldip]}
