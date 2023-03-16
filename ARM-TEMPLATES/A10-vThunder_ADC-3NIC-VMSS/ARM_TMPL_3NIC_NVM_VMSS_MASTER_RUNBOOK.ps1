@@ -27,7 +27,7 @@ Write-Output "Operation: $operation"
 Write-Output "resourceName: $resourceName"
 
 # Wait till vThunder is Up.
-start-sleep -s 240
+start-sleep -s 180
 
 # Get the resource config from variables
 $azureAutoScaleResources = Get-AutomationVariable -Name azureAutoScaleResources
@@ -41,6 +41,7 @@ if ($null -eq $azureAutoScaleResources) {
 $automationAccountName = $azureAutoScaleResources.automationAccountName
 $resourceGroupName = $azureAutoScaleResources.resourceGroupName
 $vThunderScaleSetName = $azureAutoScaleResources.vThunderScaleSetName
+$serverScaleSetName = $azureAutoScaleResources.serverScaleSetName
 
 # Authenticate with Azure Portal
 $appId = $azureAutoScaleResources.appId
@@ -110,7 +111,6 @@ foreach($vm in $vms){
 		continue
 	}
 
-	$scaleOut = $false
 	# Check if vThunder is autoscaling
 	if (($operation -eq "Scale Out") -and ($resourceName -eq $vThunderScaleSetName)) {
 		# if public ip is not present in last running public ip list than apply vThunder config
@@ -122,17 +122,25 @@ foreach($vm in $vms){
 			$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
 			$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
 			$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
+			$acosLogMetricsParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThunderResourceId"= $vm.Id}
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
 			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Log-Metrics-Config" -ResourceGroupName $resourceGroupName -Parameters $acosLogMetricsParams
 			$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
 			$uuid =  $glmJob[-1]
 			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
 			$vThNewPasswordPlanText = "$vThNewPassword"
 			Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
-			Write-output "new ip $vThunderIPAddress adding into list"
-			$scaleOut = $true
+		} else {
+			# case when Ip is not from new scale out vThunder but is Ip of configured vThunder
+			$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 		}
+	}
+
+	# Update vThunderRunningIp variable in case of vThunder scale in
+	if (($operation -eq "Scale In") -and ($resourceName -eq $vThunderScaleSetName)) {
+		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 	
 	# Check if server is autoscaling
@@ -140,15 +148,13 @@ foreach($vm in $vms){
 		Write-Output "Adding/Deleting servers from existing vthunder instances"
 		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
 		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
-	}
-
-	if (-not $scaleOut){
-		Write-output "old ip $vThunderIPAddress adding into list"
 		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 }
 
 # revoke glm
+# Check if vThunder IP address is present in vThunderProcessedIP variable but not present
+# in vThunderRunningIp varibale then execute revoke glm for that missing vThunder
 foreach($oldip in $vThunderProcessedIP.Keys){
     if (-Not $vThunderRunningIp.ContainsKey($oldip)){
 		$glmRevokeParams = @{"vThunderRevokeLicenseUUID"= $vThunderProcessedIP[$oldip]}
