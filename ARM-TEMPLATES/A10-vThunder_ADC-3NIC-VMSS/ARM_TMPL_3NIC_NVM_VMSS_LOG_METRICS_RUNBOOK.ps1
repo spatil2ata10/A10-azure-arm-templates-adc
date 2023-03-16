@@ -57,7 +57,7 @@ $workspaceId = Get-AutomationVariable -Name workspaceId
 $sharedKey = Get-AutomationVariable -Name sharedKey
 
 #vmss resource Id
-$vmssResourceId = Get-AutomationVariable -Name vmssResourceId
+$appInsightsId = Get-AutomationVariable -Name appInsightsId
 #location
 $location = $azureAutoScaleResources.location
 
@@ -180,7 +180,7 @@ function ConfigureMetrics {
     `n        `"client-id`": `"$appId`",
     `n        `"tenant-id`": `"$tenantId`",
     `n        `"secret-id`": `"$secret`",
-    `n        `"resource-id`": `"$vmssResourceId`",
+    `n        `"resource-id`": `"$appInsightsId`",
     `n        `"location`": `"$location`",
     `n        `"cpu`": `"$cpu_metrics`",
     `n        `"disk`": `"$disk_metrics`",
