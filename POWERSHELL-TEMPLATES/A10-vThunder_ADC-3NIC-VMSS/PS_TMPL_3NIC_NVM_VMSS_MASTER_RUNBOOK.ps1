@@ -5,7 +5,26 @@
 	2. GLM
 	3. SSL
 	4. Revoke GLM License.
+	5. Acos Event
+	6. Log Matrice
 #>
+
+param (
+    [Parameter(Mandatory=$false)]
+    [object] $WebhookData
+)
+
+$Payload = $WebhookData.RequestBody | ConvertTo-Json -Depth 6
+$Payload = $Payload.ToString().replace('\r\n', '')
+$Payload = $Payload.ToString().replace('\"', '"')
+$Payload = $Payload.replace('"{', '{')
+$Payload = $Payload.replace('}"', '}')
+$Payload = $Payload | ConvertFrom-Json
+$operation = $Payload.operation
+$resourceName = $Payload.context.resourceName
+
+Write-Output "Operation: $operation"
+Write-Output "resourceName: $resourceName"
 
 # Wait till vThunder is Up.
 start-sleep -s 180
@@ -22,6 +41,7 @@ if ($null -eq $azureAutoScaleResources) {
 $automationAccountName = $azureAutoScaleResources.automationAccountName
 $resourceGroupName = $azureAutoScaleResources.resourceGroupName
 $vThunderScaleSetName = $azureAutoScaleResources.vThunderScaleSetName
+$serverScaleSetName = $azureAutoScaleResources.serverScaleSetName
 
 # Authenticate with Azure Portal
 $appId = $azureAutoScaleResources.appId
@@ -30,13 +50,48 @@ $tenantId = $azureAutoScaleResources.tenantId
 
 $secureStringPwd = $secret | ConvertTo-SecureString -AsPlainText -Force
 $pscredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $appId, $secureStringPwd
-Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
+$connectResponse = Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
+
+if ($null -eq $connectResponse) {
+	Write-Output "Failed to connect Azure Portal, retrying..."
+	# Authenticate with Azure Portal
+	$appId = $azureAutoScaleResources.appId
+	$secret = Get-AutomationVariable -Name clientSecret
+	$tenantId = $azureAutoScaleResources.tenantId
+
+	$secureStringPwd = $secret | ConvertTo-SecureString -AsPlainText -Force
+	$pscredential = New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $appId, $secureStringPwd
+	$connectResponse = Connect-AzAccount -ServicePrincipal -Credential $pscredential -Tenant $tenantId
+
+	if ($null -eq $connectResponse) {
+		Write-Error "Failed to connect Azure Portal" -ErrorAction Stop
+	}
+}
 
 # Defining running IP object
 $vThunderRunningIp =  @{}
-$vThunderProcessedIP = Get-AutomationVariable -Name vThunderIP
-$vThunderProcessedIP = $vThunderProcessedIP | ConvertFrom-Json -AsHashtable
+$vThunderProcessedIPStr = Get-AutomationVariable -Name vThunderIP
 $agentPrivateIP = Get-AutomationVariable -Name agentPrivateIP
+$vThNewPassword = Get-AutomationVariable -Name vThNewPassword
+
+function deserializer {
+    param (
+        $stringValue
+    )
+    $hashTable = @{}
+    $splitValue = $stringValue.Split(";")
+    foreach($keyValue in $splitValue[0..($splitValue.Length-2)]){
+        $keyValue = $keyValue.Trim()
+        $keyValue = $keyValue.Split("=")
+        if ($null -eq $keyValue[0] -or "" -eq $keyValue[0]){
+            continue
+        }
+        $hashTable.Add($keyValue[0],$keyValue[1])
+    }
+    return $hashTable
+}
+
+$vThunderProcessedIP = deserializer -stringValue $vThunderProcessedIPStr
 
 # Get list of vm from vmss
 $vms = Get-AzVmssVM -ResourceGroupName $resourceGroupName -VMScaleSetName $vThunderScaleSetName
@@ -56,37 +111,73 @@ foreach($vm in $vms){
 		continue
 	}
 
-	# if public ip is not present in last running public ip list than apply vThunder config
-	if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
-		Write-Output $vThunderIPAddress "Configuring vthunders instances"
-		$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
-		$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
-		$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
-		$slbJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
-		$sslJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
-		$acosEventJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
-		$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
-		$uuid =  $glmJob[-1]
-		$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
+	# Check if vThunder is autoscaling
+	if (($operation -eq "Scale Out") -and ($resourceName -eq $vThunderScaleSetName)) {
+		# if public ip is not present in last running public ip list than apply vThunder config
+		if (-Not $vThunderProcessedIP.ContainsKey($vThunderIPAddress)){
+			Write-Output $vThunderIPAddress "Configuring vthunders instances"
+			$changePasswordParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Change-Password-Config" -ResourceGroupName $resourceGroupName -Parameters $changePasswordParams -Wait
+
+			$slbParams = @{"UpdateOnlyServers"=$false; "vThunderProcessingIP"= $vThunderIPAddress}
+			$sslGlmParams = @{"vThunderProcessingIP"= $vThunderIPAddress}
+			$acosEventParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "agentPrivateIP"= $agentPrivateIP}
+			$acosLogMetricsParams = @{"vThunderProcessingIP"= $vThunderIPAddress; "vThunderResourceId"= $vm.Id}
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SSL-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Event-Config" -ResourceGroupName $resourceGroupName -Parameters $acosEventParams
+			Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "Log-Metrics-Config" -ResourceGroupName $resourceGroupName -Parameters $acosLogMetricsParams
+			$glmJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Config" -ResourceGroupName $resourceGroupName -Parameters $sslGlmParams -Wait
+			$uuid =  $glmJob[-1]
+			$vThunderRunningIp.Add($vThunderIPAddress, $uuid)
+			$vThNewPasswordPlanText = "$vThNewPassword"
+			Set-AutomationVariable -Name "vThCurrentPassword" -Value $vThNewPasswordPlanText
+		} else {
+			# case when Ip is not from new scale out vThunder but is Ip of configured vThunder
+			$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
+		}
 	}
-	else{
+
+	# Update vThunderRunningIp variable in case of vThunder scale in
+	if (($operation -eq "Scale In") -and ($resourceName -eq $vThunderScaleSetName)) {
+		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
+	}
+
+	# Check if server is autoscaling
+	if ((($operation -eq "Scale Out") -or ($operation -eq "Scale In")) -and ($resourceName -eq $serverScaleSetName)) {
 		Write-Output "Adding/Deleting servers from existing vthunder instances"
 		$slbParams = @{"UpdateOnlyServers"=$true; "vThunderProcessingIP"= $vThunderIPAddress}
-		$slbJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "SLB-Config" -ResourceGroupName $resourceGroupName -Parameters $slbParams
 		$vThunderRunningIp.Add($vThunderIPAddress, $vThunderProcessedIP[$vThunderIPAddress])
 	}
 }
 
 # revoke glm
+# Check if vThunder IP address is present in vThunderProcessedIP variable but not present
+# in vThunderRunningIp varibale then execute revoke glm for that missing vThunder
 foreach($oldip in $vThunderProcessedIP.Keys){
     if (-Not $vThunderRunningIp.ContainsKey($oldip)){
 		$glmRevokeParams = @{"vThunderRevokeLicenseUUID"= $vThunderProcessedIP[$oldip]}
-		$glmRevokeJob = Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Revoke-Config" -ResourceGroupName $resourceGroupName -Parameters $glmRevokeParams -Wait
+		Start-AzAutomationRunbook -AutomationAccountName $automationAccountName -Name "GLM-Revoke-Config" -ResourceGroupName $resourceGroupName -Parameters $glmRevokeParams
     }
 }
 
-# update new running vm ip object to variables
-$vThunderRunningIp = $vThunderRunningIp | ConvertTo-Json
-$vThunderRunningIp = "$vThunderRunningIp"
-Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIp
+function serializer {
+    param (
+        $hashtableValue
+    )
+    $stringValue = ""
+    foreach($key in $hashtableValue.Keys){
+        $value = $hashtableValue[$key]
+        $stringValue = $stringValue+"$key=$value;"
+    }
+    return $stringValue
+}
+
+$vThunderRunningIpStr = serializer -hashtableValue $vThunderRunningIp
+Set-AutomationVariable -Name "vThunderIP" -Value $vThunderRunningIpStr
+
+
+Set-AutomationVariable -Name "vThNewPassApplyFlag" -Value "False"
+
 Write-Output "Done"
